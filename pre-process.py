@@ -94,7 +94,6 @@ data = data.drop(columns=[
     "demographic.days_to_death",
     "cases.consent_type",
     "cases.lost_to_followup",
-    "cases.submitter_id",
     "cases.days_to_consent"
 ])
 
