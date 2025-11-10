@@ -3,28 +3,67 @@ import numpy as np
 
 CUTOFF = 730
 
-# check filename spelling
-luad_clinical = pd.read_csv("data/lusc_clinical.tsv", sep="\t", na_values="'--")
-luad_exposure = pd.read_csv("data/lusc_exposure.tsv", sep="\t", na_values="'--")
+# FILES TO READ FROM
+clinical = pd.concat([pd.read_csv("data/luad_clincal.tsv", sep="\t", na_values="'--"),
+                      pd.read_csv("data/lusc_clinical.tsv", sep="\t", na_values="'--")],
+                      ignore_index=True)
 
-data = pd.concat([luad_clinical, luad_exposure], axis=1)
-data = data.loc[:, ~data.columns.duplicated()]
+exposure = pd.concat([pd.read_csv("data/luad_exposure.tsv", sep="\t", na_values="'--"),
+                      pd.read_csv("data/lusc_exposure.tsv", sep="\t", na_values="'--")],
+                      ignore_index=True)
 
+# only consider primary disease
+clinical = clinical[clinical["diagnoses.diagnosis_is_primary_disease"] == True]
 
-# Convert the specific columns that should be numeric to numeric dtype
-num_cols = ["diagnoses.days_to_last_follow_up", "demographic.days_to_death"]
-for col in num_cols:
-    if col in data.columns:
-        data[col] = pd.to_numeric(data[col], errors="coerce")
+# coalesce primary disease cases
+def custom_agg(series):
+    """
+    Returns the single unique non-NaN value if all non-NaN values are the same,
+    otherwise returns a sorted list of all unique values (converted to strings).
+    """
+    # Get unique values, explicitly excluding NaNs first for the condition check
+    unique_non_na = series.dropna().unique()
 
-# initialize OS
+    if len(unique_non_na) <= 1:
+        # Case 1: All non-NaN values are identical or the group is all NaN.
+        if len(unique_non_na) == 1:
+            # Safely return the single unique non-NaN value
+            return unique_non_na[0]
+        else:
+            # Group was all NaN/missing
+            return np.nan
+    else:
+        # Case 2: Multiple unique non-NaN values exist.
+        
+        # Get ALL unique values (not including nan)
+        
+        # Convert all unique elements to strings before returning and sorting.
+        # This prevents the TypeError ('<' not supported between 'str' and 'float').
+        unique_str_values = [str(x) for x in unique_non_na]
+        
+        return (unique_str_values)
+    
+# The GroupBy and Aggregation Step
+clinical = clinical.groupby("cases.submitter_id", as_index=False).agg(custom_agg)
+
+## MORE PREPROCESSING
+# combine exposure and clinical sets
+data = pd.concat(
+    [clinical.set_index('cases.submitter_id'), exposure.set_index('cases.submitter_id')],
+    axis=1
+).reset_index()
+
+## OS ASSIGNMENT LOGIC
 data["OS"] = -1  # 1 --> survive, 0 --> death
 
 # build element-wise conditions
 cond_alive = (
-    (data["demographic.vital_status"] == "Alive")
+    ((data["demographic.vital_status"] == "Alive")
     & data["diagnoses.days_to_last_follow_up"].notna()
-    & (data["diagnoses.days_to_last_follow_up"] >= CUTOFF)
+    & (data["diagnoses.days_to_last_follow_up"] >= CUTOFF))
+    or ((data["demographic.vital_status"] == "Dead")
+    & data["diagnoses.days_to_last_follow_up"].notna()
+    & (data["diagnoses.days_to_last_follow_up"] >= CUTOFF))
 )
 
 cond_dead = (
@@ -35,70 +74,36 @@ cond_dead = (
 
 data["OS"] = np.select([cond_alive, cond_dead], [1, 0], default=-1)
 
-# quick checks
-print(data[["demographic.vital_status",
-                     "diagnoses.days_to_last_follow_up",
-                     "demographic.days_to_death",
-                     "OS"]].head())
+data.to_csv('out/data_full.csv', index=False)
 
-print("dtypes:\n", data[["diagnoses.days_to_last_follow_up",
-                                 "demographic.days_to_death"]].dtypes)
 print("OS value counts:\n", data["OS"].value_counts(dropna=False))
 
-data = data[data["OS"] != -1] # drop invalid patients
+# drop all invalid examples
+data = data[data["OS"] != -1]
 
-data = data.dropna(axis=1, how="all") # drop columns of all nan
-
-data = data[data["diagnoses.diagnosis_is_primary_disease"] == True] # drop non-primary cases
-
-# function to concatenate fields if different
-def combine_group(group):
-    def combine_column(x):
-        vals = x.dropna().unique()
-        if len(vals) == 0:
-            return None  # all NaN
-        elif len(vals) == 1:
-            return vals[0]
-        else:
-            # convert all to string before joining
-            return '; '.join(sorted(map(str, vals)))
-    return group.apply(combine_column)
-
-# remove repeats
-data = data.groupby("cases.submitter_id", as_index=False).apply(combine_group)
-
-# remove indexing
-data.reset_index(drop=True, inplace=True)
-
-# take intersect with pathology reports
-filter = pd.read_csv("data/TCGA_Reports.csv")
-filter = filter["patient_filename"]
-mask = data["cases.submitter_id"].apply(
-    lambda x: any(x in full_id for full_id in filter)
-)
-data = data[mask].copy()
+# drop unrelated/sparese features
+data.dropna(axis='columns', how='all', inplace=True)  # empty columns
+data = data.drop(labels=["treatments.treatment_id", "treatments.submitter_id",
+                                 "diagnoses.year_of_diagnosis", "diagnoses.submitter_id",
+                                 "diagnoses.diagnosis_id", "diagnoses.classification_of_tumor",
+                                 "demographic.submitter_id", "demographic.demographic_id",
+                                 "demographic.age_is_obfuscated", "cases.case_id",
+                                 "cases.consent_type", "cases.case_id",
+                                 "project.project_id"], axis='columns') # project.project_id
 
 
-# drop irrelevant features
-data = data.drop(columns=[
-    "cases.case_id",
-    "demographic.demographic_id",
-    "demographic.demographic_id",
-    "diagnoses.diagnosis_id",
-    "treatments.treatment_id",
-    "demographic.submitter_id",
-    "diagnoses.submitter_id",
-    "treatments.submitter_id",
-    "demographic.vital_status",
-    "diagnoses.days_to_last_follow_up",
-    "demographic.days_to_death",
-    "cases.consent_type",
-    "cases.lost_to_followup",
-    "cases.days_to_consent"
-])
+embeddings = pd.read_csv("out/embeddings.csv")
+embeddings["cases.submitter_id"] = embeddings["patient"].str.split(".").str[0]
+embeddings.drop(labels="patient", axis="columns", inplace=True)
+embeddings = embeddings[['cases.submitter_id', 'embedding']]
 
+embeddings = embeddings[embeddings["cases.submitter_id"].isin(data["cases.submitter_id"])]
+data = data[data["cases.submitter_id"].isin(embeddings["cases.submitter_id"])]
 
-# save to csv
+print("OS value counts:\n", data["OS"].value_counts(dropna=False))
+
+print("Examples: ", data.shape[0])
+print("Features: ", data.shape[1])
+
+embeddings.to_csv('out/embeddings_processed.csv', index=False)
 data.to_csv('out/data.csv', index=False)
-
-print("OS value counts:\n", data["OS"].value_counts(dropna=False))
