@@ -58,12 +58,8 @@ data["OS"] = -1  # 1 --> survive, 0 --> death
 
 # build element-wise conditions
 cond_alive = (
-    ((data["demographic.vital_status"] == "Alive")
-    & data["diagnoses.days_to_last_follow_up"].notna()
-    & (data["diagnoses.days_to_last_follow_up"] >= CUTOFF))
-    or ((data["demographic.vital_status"] == "Dead")
-    & data["diagnoses.days_to_last_follow_up"].notna()
-    & (data["diagnoses.days_to_last_follow_up"] >= CUTOFF))
+    data["diagnoses.days_to_last_follow_up"].notna()
+    & (data["diagnoses.days_to_last_follow_up"] >= CUTOFF)
 )
 
 cond_dead = (
@@ -89,7 +85,29 @@ data = data.drop(labels=["treatments.treatment_id", "treatments.submitter_id",
                                  "demographic.submitter_id", "demographic.demographic_id",
                                  "demographic.age_is_obfuscated", "cases.case_id",
                                  "cases.consent_type", "cases.case_id",
-                                 "project.project_id"], axis='columns') # project.project_id
+                                 "project.project_id", "cases.days_to_consent",
+                                 "cases.index_date", "cases.lost_to_followup", 
+                                 "cases.primary_site", "demographic.days_to_birth",
+                                 "demographic.days_to_death", "demographic.ethnicity",
+                                 "demographic.race", "demographic.vital_status",
+                                 "demographic.year_of_birth", "diagnoses.age_at_diagnosis",
+                                 "diagnoses.days_to_diagnosis", "diagnoses.days_to_last_follow_up",
+                                 "diagnoses.diagnosis_is_primary_disease", "diagnoses.last_known_disease_status",
+                                 "diagnoses.primary_diagnosis", "diagnoses.prior_treatment",
+                                 "diagnoses.progression_or_recurrence", "diagnoses.site_of_resection_or_biopsy",
+                                 "diagnoses.sites_of_involvement", "diagnoses.synchronous_malignancy",
+                                 "diagnoses.tumor_grade", "treatments.clinical_trial_indicator",
+                                 "treatments.course_number", "treatments.days_to_treatment_end",
+                                 "treatments.days_to_treatment_start", "treatments.initial_disease_status",
+                                 "treatments.number_of_cycles", "treatments.number_of_fractions",
+                                 "treatments.prescribed_dose", "treatments.prescribed_dose_units",
+                                 "treatments.route_of_administration", "treatments.treatment_anatomic_sites",
+                                 "treatments.treatment_dose", "treatments.treatment_dose_units",
+                                 "treatments.treatment_intent_type", "treatments.treatment_or_therapy",
+                                 "treatments.treatment_outcome", "exposures.alcohol_history",
+                                 "exposures.cigarettes_per_day", "exposures.exposure_type",
+                                 "exposures.tobacco_smoking_onset_year",
+                                 "exposures.tobacco_smoking_quit_year"], axis='columns') # project.project_id
 
 
 embeddings = pd.read_csv("out/embeddings.csv")
