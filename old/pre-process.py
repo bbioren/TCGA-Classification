@@ -3,13 +3,12 @@ import numpy as np
 
 CUTOFF = 365
 
-# check filename spelling
-luad_clinical = pd.read_csv("data/luad_clincal.tsv", sep="\t", na_values="'--")
-luad_exposure = pd.read_csv("data/lusc_exposure.tsv", sep="\t", na_values="'--")
+# FILES TO READ FROM
+clinical = pd.read_csv("data/luad_clincal.tsv", sep="\t", na_values="'--")
+exposure = pd.read_csv("data/luad_exposure.tsv", sep="\t", na_values="'--")
 
-data = pd.concat([luad_clinical, luad_exposure], axis=1)
+data = pd.concat([clinical, exposure], axis=1)
 data = data.loc[:, ~data.columns.duplicated()]
-
 
 # Convert the specific columns that should be numeric to numeric dtype
 num_cols = ["diagnoses.days_to_last_follow_up", "demographic.days_to_death"]
