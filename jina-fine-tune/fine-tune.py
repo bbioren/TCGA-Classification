@@ -46,18 +46,47 @@ train_examples = [
 train_dataset = SentenceLabelDataset(train_examples)
 # ESSENTIAL FIX: num_workers=0 to prevent indexing/empty batch issues with IterableDataset
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=0)
-
 # --- Step 2: Load Model and Define Training Objective ---
 
 print(f"Loading model: {MODEL_NAME} with default_task='{TASK}'...")
 model = SentenceTransformer(
     MODEL_NAME,
     trust_remote_code=True,
-    max_seq_length=8192, # <--- FULL CONTEXT: Set to 8192 tokens
     model_kwargs={
         'default_task': TASK,
     }
 )
+
+# ⭐️ CRITICAL FIX: Set max_seq_length directly as a property *after* initialization
+model.max_seq_length = 8192 
+print(f"Set model max sequence length to: {model.max_seq_length}")
+
+
+# Use CoSENTLoss
+train_loss = losses.CoSENTLoss(model=model)
+
+# --- Step 3: Fine-Tune the Model ---
+
+print("Starting fine-tuning...")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Define Training Arguments with memory optimizations
+# (Ensure you import SentenceTransformerTrainingArguments at the top)
+training_args = SentenceTransformerTrainingArguments(
+    output_dir=OUTPUT_DIR,
+    num_train_epochs=NUM_EPOCHS,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=1,
+    learning_rate=LEARNING_RATE,
+    evaluation_strategy="no",
+    save_strategy="epoch",
+    warmup_ratio=WARMUP_RATIO,
+    fp16=True,                       # Critical for memory
+    gradient_checkpointing=True,     # Critical for memory
+    logging_steps=50,
+)
+
+# ... (rest of the model.fit() call)
 
 # Use CoSENTLoss
 train_loss = losses.CoSENTLoss(model=model)
