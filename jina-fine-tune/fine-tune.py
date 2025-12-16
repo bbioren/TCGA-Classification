@@ -22,7 +22,7 @@ WARMUP_STEPS = 100
 # -----------------------------
 df = pd.read_csv(DATA_CSV)
 examples = [
-    InputExample(texts=[row["sentence"]], label=float(row["label"]))
+    InputExample(texts=[row["text"]], label=float(row["OS"]))
     for _, row in df.iterrows()
 ]
 
@@ -60,8 +60,8 @@ print(f"Fine-tuned model saved to {OUTPUT_DIR}")
 # Optional evaluation (AUC)
 # -----------------------------
 print("Evaluating model AUC on training set...")
-sentences = df['sentence'].tolist()
-labels = df['label'].tolist()
+sentences = df['text'].tolist()
+labels = df['OS'].tolist()
 
 embeddings = model.encode(sentences)
 clf = LogisticRegression(max_iter=1000).fit(embeddings, labels)
