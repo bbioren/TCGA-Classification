@@ -5,8 +5,6 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import os
-# Import SentenceTransformerTrainingArguments for memory optimization
-from sentence_transformers import SentenceTransformerTrainingArguments 
 
 # --- Configuration (A100 Optimized for Long Context) ---
 MODEL_NAME = "jinaai/jina-embeddings-v3"
@@ -63,31 +61,17 @@ print(f"Set model max sequence length to: {model.max_seq_length}")
 # Use CoSENTLoss
 train_loss = losses.CoSENTLoss(model=model)
 
+# Calculate warmup steps
+total_steps = len(train_dataloader) * NUM_EPOCHS
+warmup_steps = int(total_steps * WARMUP_RATIO)
+
+
 # --- Step 3: Fine-Tune the Model ---
 
 print("Starting fine-tuning...")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Define Training Arguments with memory optimizations
-training_args = SentenceTransformerTrainingArguments(
-    output_dir=OUTPUT_DIR,
-    num_train_epochs=NUM_EPOCHS,
-    per_device_train_batch_size=BATCH_SIZE,
-    gradient_accumulation_steps=1,
-    learning_rate=LEARNING_RATE,
-    warmup_ratio=WARMUP_RATIO,
-    fp16=True,                       # CRITICAL: Enables mixed precision
-    gradient_checkpointing=True,     # CRITICAL: Saves VRAM by recomputing activations
-    logging_steps=50,
-    
-    # Removed unsupported arguments: evaluation_strategy and save_strategy
-)
-
-# Calculate warmup steps
-total_steps = len(train_dataloader) * NUM_EPOCHS
-warmup_steps = int(total_steps * WARMUP_RATIO)
-
-# Using model.fit() for simplicity with the custom DataLoader (Compatible Version)
+# Using model.fit() with direct parameters and BFloat16 memory flags
 model.fit(
     train_objectives=[(train_dataloader, train_loss)],
     epochs=NUM_EPOCHS,
@@ -98,9 +82,9 @@ model.fit(
     show_progress_bar=True,
     save_best_model=True,
     
-    # We must rely on the underlying library to pick up FP16/checkpointing
-    # by using the standard arguments.
-    # We remove the custom 'args=training_args' call.
+    # CRITICAL FIX: Use bf16 instead of fp16 to match model's architecture
+    bf16=True,                      
+    gradient_checkpointing=True,    
 )
 
 print(f"\n✅ Fine-tuning complete. Model saved to {OUTPUT_DIR}")
