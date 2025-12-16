@@ -21,7 +21,7 @@ print(f"Loading data from {CSV_FILE}...")
 df = pd.read_csv(CSV_FILE)
 
 # Ensure required columns are present
-print(df.head)
+print(df.head())
 if 'text' not in df.columns or 'OS' not in df.columns:
     raise ValueError("CSV must contain 'text' and 'OS' columns.")
 
