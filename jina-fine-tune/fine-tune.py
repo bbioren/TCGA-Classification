@@ -14,8 +14,7 @@ CSV_FILE = "/root/TCGA-Classification/jina-fine-tune/data.csv"
 OUTPUT_DIR = "jina-v3-finetuned-fullcontext"
 TASK = "classification"
 NUM_EPOCHS = 3
-# We are prioritizing long context (8192) over high batch size.
-# Start with a safe BATCH_SIZE=4 to allow space for the huge activations.
+# Prioritizing full context (8192) over high batch size.
 BATCH_SIZE = 4         
 LEARNING_RATE = 2e-5
 WARMUP_RATIO = 0.1
@@ -25,7 +24,6 @@ print(f"Loading data from {CSV_FILE}...")
 df = pd.read_csv(CSV_FILE)
 
 # Ensure required columns are present
-print(df.head())
 if 'text' not in df.columns or 'OS' not in df.columns:
     raise ValueError("CSV must contain 'text' and 'OS' columns.")
 
@@ -44,8 +42,9 @@ train_examples = [
 
 # The SentenceLabelDataset wraps the examples
 train_dataset = SentenceLabelDataset(train_examples)
-# ESSENTIAL FIX: num_workers=0 to prevent indexing/empty batch issues with IterableDataset
+# FIX: num_workers=0 to prevent indexing/empty batch issues with IterableDataset
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=0)
+
 # --- Step 2: Load Model and Define Training Objective ---
 
 print(f"Loading model: {MODEL_NAME} with default_task='{TASK}'...")
@@ -56,42 +55,13 @@ model = SentenceTransformer(
         'default_task': TASK,
     }
 )
-
-# ⭐️ CRITICAL FIX: Set max_seq_length directly as a property *after* initialization
+# FIX: Set max_seq_length directly as a property *after* initialization
 model.max_seq_length = 8192 
 print(f"Set model max sequence length to: {model.max_seq_length}")
 
 
 # Use CoSENTLoss
 train_loss = losses.CoSENTLoss(model=model)
-
-# --- Step 3: Fine-Tune the Model ---
-
-print("Starting fine-tuning...")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Define Training Arguments with memory optimizations
-# (Ensure you import SentenceTransformerTrainingArguments at the top)
-training_args = SentenceTransformerTrainingArguments(
-    output_dir=OUTPUT_DIR,
-    num_train_epochs=NUM_EPOCHS,
-    per_device_train_batch_size=BATCH_SIZE,
-    gradient_accumulation_steps=1,
-    learning_rate=LEARNING_RATE,
-    evaluation_strategy="no",
-    save_strategy="epoch",
-    warmup_ratio=WARMUP_RATIO,
-    fp16=True,                       # Critical for memory
-    gradient_checkpointing=True,     # Critical for memory
-    logging_steps=50,
-)
-
-# ... (rest of the model.fit() call)
-
-# Use CoSENTLoss
-train_loss = losses.CoSENTLoss(model=model)
-
-# --- Step 3: Fine-Tune the Model ---
 
 # --- Step 3: Fine-Tune the Model ---
 
@@ -110,8 +80,7 @@ training_args = SentenceTransformerTrainingArguments(
     gradient_checkpointing=True,     # CRITICAL: Saves VRAM by recomputing activations
     logging_steps=50,
     
-    # REMOVED: evaluation_strategy="no",  <-- This caused the error
-    # REMOVED: save_strategy="epoch",     <-- Also often unsupported/handled by fit()
+    # Removed unsupported arguments: evaluation_strategy and save_strategy
 )
 
 # Calculate warmup steps
