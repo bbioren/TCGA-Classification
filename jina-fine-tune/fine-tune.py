@@ -12,7 +12,7 @@ CSV_FILE = "/root/TCGA-Classification/jina-fine-tune/data.csv"
 OUTPUT_DIR = "jina-v3-finetuned-classification"
 TASK = "classification"
 NUM_EPOCHS = 3          # Recommended starting point for LoRA fine-tuning
-BATCH_SIZE = 4         # Adjust based on your GPU memory (8GB VRAM is typically sufficient for this model)
+BATCH_SIZE = 2         # Adjust based on your GPU memory (8GB VRAM is typically sufficient for this model)
 LEARNING_RATE = 2e-5
 WARMUP_RATIO = 0.1
 
