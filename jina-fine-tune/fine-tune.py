@@ -41,7 +41,7 @@ train_examples = [
 # The SentenceLabelDataset wraps the examples and automatically creates positive pairs
 # (texts with the same label) for the CoSENTLoss.
 train_dataset = SentenceLabelDataset(train_examples)
-train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=BATCH_SIZE, num_workers=4)
+train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=4)
 
 # --- Step 2: Load Model and Define Training Objective ---
 
