@@ -87,14 +87,20 @@ training_args = SentenceTransformerTrainingArguments(
 total_steps = len(train_dataloader) * NUM_EPOCHS
 warmup_steps = int(total_steps * WARMUP_RATIO)
 
-# Using model.fit() with training arguments
+# Using model.fit() for simplicity with the custom DataLoader (Compatible Version)
 model.fit(
     train_objectives=[(train_dataloader, train_loss)],
-    args=training_args, # Pass the defined arguments
+    epochs=NUM_EPOCHS,
     warmup_steps=warmup_steps,
+    scheduler='warmupcosine',
+    optimizer_params={'lr': LEARNING_RATE},
     output_path=OUTPUT_DIR,
     show_progress_bar=True,
     save_best_model=True,
+    
+    # We must rely on the underlying library to pick up FP16/checkpointing
+    # by using the standard arguments.
+    # We remove the custom 'args=training_args' call.
 )
 
 print(f"\n✅ Fine-tuning complete. Model saved to {OUTPUT_DIR}")
