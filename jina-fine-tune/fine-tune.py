@@ -93,6 +93,8 @@ train_loss = losses.CoSENTLoss(model=model)
 
 # --- Step 3: Fine-Tune the Model ---
 
+# --- Step 3: Fine-Tune the Model ---
+
 print("Starting fine-tuning...")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -101,14 +103,15 @@ training_args = SentenceTransformerTrainingArguments(
     output_dir=OUTPUT_DIR,
     num_train_epochs=NUM_EPOCHS,
     per_device_train_batch_size=BATCH_SIZE,
-    gradient_accumulation_steps=1, # Keep this at 1 for simplicity (can increase if OOM)
+    gradient_accumulation_steps=1,
     learning_rate=LEARNING_RATE,
-    evaluation_strategy="no",
-    save_strategy="epoch",
     warmup_ratio=WARMUP_RATIO,
-    fp16=True,                       # <--- CRITICAL: Enables mixed precision (half memory)
-    gradient_checkpointing=True,     # <--- CRITICAL: Saves significant VRAM (trades speed)
+    fp16=True,                       # CRITICAL: Enables mixed precision
+    gradient_checkpointing=True,     # CRITICAL: Saves VRAM by recomputing activations
     logging_steps=50,
+    
+    # REMOVED: evaluation_strategy="no",  <-- This caused the error
+    # REMOVED: save_strategy="epoch",     <-- Also often unsupported/handled by fit()
 )
 
 # Calculate warmup steps
