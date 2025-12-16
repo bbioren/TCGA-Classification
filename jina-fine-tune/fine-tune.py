@@ -5,14 +5,18 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import os
+# Import SentenceTransformerTrainingArguments for memory optimization
+from sentence_transformers import SentenceTransformerTrainingArguments 
 
-# --- Configuration ---
+# --- Configuration (A100 Optimized for Long Context) ---
 MODEL_NAME = "jinaai/jina-embeddings-v3"
 CSV_FILE = "/root/TCGA-Classification/jina-fine-tune/data.csv"
-OUTPUT_DIR = "jina-v3-finetuned-classification"
+OUTPUT_DIR = "jina-v3-finetuned-fullcontext"
 TASK = "classification"
-NUM_EPOCHS = 3          # Recommended starting point for LoRA fine-tuning
-BATCH_SIZE = 2         # Adjust based on your GPU memory (8GB VRAM is typically sufficient for this model)
+NUM_EPOCHS = 3
+# We are prioritizing long context (8192) over high batch size.
+# Start with a safe BATCH_SIZE=4 to allow space for the huge activations.
+BATCH_SIZE = 4         
 LEARNING_RATE = 2e-5
 WARMUP_RATIO = 0.1
 
@@ -38,44 +42,55 @@ train_examples = [
     for _, row in train_df.iterrows()
 ]
 
-# The SentenceLabelDataset wraps the examples and automatically creates positive pairs
-# (texts with the same label) for the CoSENTLoss.
+# The SentenceLabelDataset wraps the examples
 train_dataset = SentenceLabelDataset(train_examples)
-train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=4)
+# ESSENTIAL FIX: num_workers=0 to prevent indexing/empty batch issues with IterableDataset
+train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=0)
 
 # --- Step 2: Load Model and Define Training Objective ---
 
-# Load the model, specifying the 'classification' task for LoRA tuning
 print(f"Loading model: {MODEL_NAME} with default_task='{TASK}'...")
 model = SentenceTransformer(
     MODEL_NAME,
     trust_remote_code=True,
+    max_seq_length=8192, # <--- FULL CONTEXT: Set to 8192 tokens
     model_kwargs={
         'default_task': TASK,
-        # Set this to True to fine-tune the ENTIRE model, not just LoRA adapters (requires much more VRAM)
-        # 'lora_main_params_trainable': False
     }
 )
 
-# Use CoSENTLoss, which is highly effective for contrastive learning and semantic similarity
+# Use CoSENTLoss
 train_loss = losses.CoSENTLoss(model=model)
-
-# Calculate warmup steps
-total_steps = len(train_dataloader) * NUM_EPOCHS
-warmup_steps = int(total_steps * WARMUP_RATIO)
 
 # --- Step 3: Fine-Tune the Model ---
 
 print("Starting fine-tuning...")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Using model.fit() for simplicity with the custom DataLoader
+# Define Training Arguments with memory optimizations
+training_args = SentenceTransformerTrainingArguments(
+    output_dir=OUTPUT_DIR,
+    num_train_epochs=NUM_EPOCHS,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=1, # Keep this at 1 for simplicity (can increase if OOM)
+    learning_rate=LEARNING_RATE,
+    evaluation_strategy="no",
+    save_strategy="epoch",
+    warmup_ratio=WARMUP_RATIO,
+    fp16=True,                       # <--- CRITICAL: Enables mixed precision (half memory)
+    gradient_checkpointing=True,     # <--- CRITICAL: Saves significant VRAM (trades speed)
+    logging_steps=50,
+)
+
+# Calculate warmup steps
+total_steps = len(train_dataloader) * NUM_EPOCHS
+warmup_steps = int(total_steps * WARMUP_RATIO)
+
+# Using model.fit() with training arguments
 model.fit(
     train_objectives=[(train_dataloader, train_loss)],
-    epochs=NUM_EPOCHS,
+    args=training_args, # Pass the defined arguments
     warmup_steps=warmup_steps,
-    scheduler='warmupcosine',
-    optimizer_params={'lr': LEARNING_RATE},
     output_path=OUTPUT_DIR,
     show_progress_bar=True,
     save_best_model=True,
