@@ -8,7 +8,7 @@ import os
 
 # --- Configuration ---
 MODEL_NAME = "jinaai/jina-embeddings-v3"
-CSV_FILE = "data.csv"
+CSV_FILE = "~/TCGA-Classification/jina-fine-tune/data.csv"
 OUTPUT_DIR = "jina-v3-finetuned-classification"
 TASK = "classification"
 NUM_EPOCHS = 3          # Recommended starting point for LoRA fine-tuning
