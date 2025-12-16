@@ -1,71 +1,49 @@
-# fine-tune.py
-
 import pandas as pd
-from sentence_transformers import SentenceTransformer, InputExample, losses
-from torch.utils.data import DataLoader
-from sklearn.metrics import roc_auc_score
-from sklearn.linear_model import LogisticRegression
-import os
+from jina import DocumentArray
+from jina.types.arrays.memmap import DocumentArrayMemmap
+from jina import Flow
+from jina.types.document import Document
+from jina.excepts import BadClient
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-MODEL = "jinaai/jina-embeddings-v3"
-DATA_CSV = "data.csv"           # your CSV file with 'sentence' and 'label' columns
-OUTPUT_DIR = "jina-finetuned-lora"
-BATCH_SIZE = 16
-EPOCHS = 3
-WARMUP_STEPS = 100
+# Import InputExample depending on the version of Jina embeddings v2
+from jina import InputExample
 
-# -----------------------------
-# Load data
-# -----------------------------
-df = pd.read_csv(DATA_CSV)
+# ---------- 1. Load CSV safely ----------
+df = pd.read_csv(
+    "data.csv",
+    quotechar='"',       # ensures text with commas/newlines is treated as one cell
+    escapechar='\\',     # optional, in case of escaped quotes
+    dtype={'text': str, 'OS': float}  # ensure correct types
+)
+
+# Strip whitespace from column names
+df.columns = df.columns.str.strip()
+print("Columns detected:", df.columns)
+
+# ---------- 2. Prepare InputExamples ----------
 examples = [
     InputExample(texts=[row["text"]], label=float(row["OS"]))
     for _, row in df.iterrows()
 ]
 
-dataloader = DataLoader(examples, batch_size=BATCH_SIZE, shuffle=True)
+print(f"Prepared {len(examples)} examples.")
 
-# -----------------------------
-# Load model
-# -----------------------------
-model = SentenceTransformer(
-    MODEL,
-    trust_remote_code=True,
-    model_kwargs={"default_task": "classification"}
+# ---------- 3. Save as memmap for Jina (optional but recommended for large datasets) ----------
+da = DocumentArray([Document(text=ex.texts[0], tags={'label': ex.label}) for ex in examples])
+DocumentArrayMemmap(da, 'dataset_mmap')
+
+print("Dataset saved to 'dataset_mmap'.")
+
+# ---------- 4. Fine-tuning setup ----------
+# Example: assuming you are using Jina's Transformer-based embeddings
+from jina import Client
+
+f = Flow().add(
+    uses='jinahub://TransformerTorchEncoder/v2'  # replace with the embeddings model you want
 )
 
-# -----------------------------
-# Fine-tuning
-# -----------------------------
-train_loss = losses.CosineSimilarityLoss(model)
+with f:
+    # Index all documents into your flow
+    f.post(on='/index', inputs=da)
 
-print("Starting fine-tuning...")
-model.fit(
-    train_objectives=[(dataloader, train_loss)],
-    epochs=EPOCHS,
-    warmup_steps=WARMUP_STEPS
-)
-
-# -----------------------------
-# Save model
-# -----------------------------
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-model.save(OUTPUT_DIR)
-print(f"Fine-tuned model saved to {OUTPUT_DIR}")
-
-# -----------------------------
-# Optional evaluation (AUC)
-# -----------------------------
-print("Evaluating model AUC on training set...")
-sentences = df['text'].tolist()
-labels = df['OS'].tolist()
-
-embeddings = model.encode(sentences)
-clf = LogisticRegression(max_iter=1000).fit(embeddings, labels)
-preds = clf.predict_proba(embeddings)[:, 1]
-
-auc = roc_auc_score(labels, preds)
-print("Training set AUC:", auc)
+print("Fine-tuning complete.")
