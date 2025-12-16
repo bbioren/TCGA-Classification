@@ -1,121 +1,71 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# fine-tune.py
+
 import pandas as pd
-from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, AutoModel
-from torch.optim import AdamW
-from tqdm import tqdm
-import random
-from collections import defaultdict
+from sentence_transformers import SentenceTransformer, InputExample, losses
+from torch.utils.data import DataLoader
+from sklearn.metrics import roc_auc_score
+from sklearn.linear_model import LogisticRegression
+import os
 
-class SupConLoss(nn.Module):
-    def __init__(self, temperature=0.07):
-        super().__init__()
-        self.temperature = temperature
-
-    def forward(self, features, labels):
-        device = features.device
-        labels = labels.view(-1, 1)
-        mask = torch.eq(labels, labels.T).float().to(device)
-
-        features = F.normalize(features, dim=1)
-        logits = torch.matmul(features, features.T) / self.temperature
-
-        logits_mask = torch.ones_like(mask) - torch.eye(mask.size(0), device=device)
-        mask = mask * logits_mask
-
-        exp_logits = torch.exp(logits) * logits_mask
-        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-12)
-
-        mean_log_prob_pos = (mask * log_prob).sum(1) / (mask.sum(1) + 1e-12)
-        return -mean_log_prob_pos.mean()
-
-class CSVDataset(Dataset):
-    def __init__(self, path):
-        self.df = pd.read_csv(path)
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-        return self.df.iloc[idx]["sentence"], int(self.df.iloc[idx]["label"])
-
-class BalancedBatchSampler:
-    def __init__(self, labels, samples_per_class):
-        self.indexes = defaultdict(list)
-        for i, y in enumerate(labels):
-            self.indexes[y].append(i)
-        self.labels = list(self.indexes.keys())
-        self.samples_per_class = samples_per_class
-
-    def __iter__(self):
-        while True:
-            batch = []
-            for y in self.labels:
-                batch.extend(random.sample(self.indexes[y], self.samples_per_class))
-            random.shuffle(batch)
-            yield batch
-
-def mean_pooling(hidden_states, attention_mask):
-    mask = attention_mask.unsqueeze(-1).float()
-    return (hidden_states * mask).sum(1) / mask.sum(1)
-
+# -----------------------------
+# CONFIG
+# -----------------------------
 MODEL = "jinaai/jina-embeddings-v3"
+DATA_CSV = "data.csv"           # your CSV file with 'sentence' and 'label' columns
+OUTPUT_DIR = "jina-finetuned-lora"
+BATCH_SIZE = 16
+EPOCHS = 3
+WARMUP_STEPS = 100
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-model = AutoModel.from_pretrained(MODEL, trust_remote_code=True)
+# -----------------------------
+# Load data
+# -----------------------------
+df = pd.read_csv(DATA_CSV)
+examples = [
+    InputExample(texts=[row["sentence"]], label=float(row["label"]))
+    for _, row in df.iterrows()
+]
 
-model.gradient_checkpointing_enable()
+dataloader = DataLoader(examples, batch_size=BATCH_SIZE, shuffle=True)
 
-for p in model.parameters():
-    p.requires_grad = False
-
-# unfreeze top 4 layers
-for layer in model.encoder.layer[-4:]:
-    for p in layer.parameters():
-        p.requires_grad = True
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model.to(device)
-
-dataset = CSVDataset("data.csv")
-labels = dataset.df["label"].tolist()
-
-sampler = BalancedBatchSampler(labels, samples_per_class=16)
-
-loader = DataLoader(
-    dataset,
-    batch_sampler=sampler,
-    collate_fn=lambda batch: ([x[0] for x in batch],
-                              torch.tensor([x[1] for x in batch]))
+# -----------------------------
+# Load model
+# -----------------------------
+model = SentenceTransformer(
+    MODEL,
+    trust_remote_code=True,
+    model_kwargs={"default_task": "classification"}
 )
 
-criterion = SupConLoss()
-optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-5)
+# -----------------------------
+# Fine-tuning
+# -----------------------------
+train_loss = losses.CosineSimilarityLoss(model)
 
-model.train()
-steps = 1500
+print("Starting fine-tuning...")
+model.fit(
+    train_objectives=[(dataloader, train_loss)],
+    epochs=EPOCHS,
+    warmup_steps=WARMUP_STEPS
+)
 
-for step, (sentences, y) in zip(range(steps), loader):
-    optimizer.zero_grad()
+# -----------------------------
+# Save model
+# -----------------------------
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+model.save(OUTPUT_DIR)
+print(f"Fine-tuned model saved to {OUTPUT_DIR}")
 
-    inputs = tokenizer(
-        sentences,
-        padding=True,
-        truncation=True,
-        return_tensors="pt"
-    ).to(device)
+# -----------------------------
+# Optional evaluation (AUC)
+# -----------------------------
+print("Evaluating model AUC on training set...")
+sentences = df['sentence'].tolist()
+labels = df['label'].tolist()
 
-    outputs = model(**inputs)
-    embeddings = mean_pooling(outputs.last_hidden_state, inputs["attention_mask"])
+embeddings = model.encode(sentences)
+clf = LogisticRegression(max_iter=1000).fit(embeddings, labels)
+preds = clf.predict_proba(embeddings)[:, 1]
 
-    loss = criterion(embeddings, y.to(device))
-    loss.backward()
-    optimizer.step()
-
-    if step % 100 == 0:
-        print(f"Step {step} | Loss {loss.item():.4f}")
-
-model.save_pretrained("jina-finetuned")
-tokenizer.save_pretrained("jina-finetuned")
+auc = roc_auc_score(labels, preds)
+print("Training set AUC:", auc)
